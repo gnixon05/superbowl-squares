@@ -1,0 +1,61 @@
+import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const dbPath = path.join(__dirname, '..', '..', 'superbowl_squares.db');
+const db = new Database(dbPath);
+
+// Enable WAL mode for better concurrent read performance
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+export function initializeDatabase() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      firstName TEXT NOT NULL,
+      lastName TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      avatar TEXT DEFAULT '',
+      createdAt TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS games (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      creatorId INTEGER NOT NULL,
+      teamRow TEXT NOT NULL,
+      teamCol TEXT NOT NULL,
+      gridSize INTEGER DEFAULT 5,
+      status TEXT DEFAULT 'open' CHECK(status IN ('open', 'locked', 'completed')),
+      isPublic INTEGER DEFAULT 1,
+      numbersRow TEXT DEFAULT NULL,
+      numbersCol TEXT DEFAULT NULL,
+      winner TEXT DEFAULT NULL,
+      rowScore INTEGER DEFAULT NULL,
+      colScore INTEGER DEFAULT NULL,
+      createdAt TEXT DEFAULT (datetime('now')),
+      lockedAt TEXT DEFAULT NULL,
+      completedAt TEXT DEFAULT NULL,
+      FOREIGN KEY (creatorId) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS squares (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gameId INTEGER NOT NULL,
+      row INTEGER NOT NULL,
+      col INTEGER NOT NULL,
+      userId INTEGER DEFAULT NULL,
+      claimedAt TEXT DEFAULT NULL,
+      FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+      FOREIGN KEY (userId) REFERENCES users(id),
+      UNIQUE(gameId, row, col)
+    );
+  `);
+}
+
+export default db;

@@ -1,0 +1,46 @@
+/* Mobile-first responsive styles */
+
+body {
+  background-color: #f5f6fa;
+}
+
+/* Smooth transitions for interactive elements */
+.card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+  transform: translateY(-1px);
+}
+
+/* Game grid responsive adjustments */
+@media (max-width: 576px) {
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Navbar mobile tweaks */
+@media (max-width: 767px) {
+  .navbar-collapse .nav-link {
+    padding: 0.5rem 0;
+  }
+}
+
+/* Badge styling */
+.badge {
+  font-weight: 500;
+}
+
+/* Tab styling */
+.nav-tabs .nav-link {
+  font-weight: 500;
+}
+
+/* Form styling */
+.form-control:focus,
+.form-select:focus {
+  border-color: #ffc107;
+  box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25);
+}
