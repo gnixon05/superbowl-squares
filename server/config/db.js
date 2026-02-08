@@ -12,6 +12,11 @@ const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+function hasColumn(table, column) {
+  const cols = db.pragma(`table_info(${table})`);
+  return cols.some((c) => c.name === column);
+}
+
 export function initializeDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -56,6 +61,30 @@ export function initializeDatabase() {
       UNIQUE(gameId, row, col)
     );
   `);
+
+  // Migrate from old single-winner schema to per-quarter schema
+  if (!hasColumn('games', 'scores')) {
+    db.exec('ALTER TABLE games ADD COLUMN scores TEXT DEFAULT NULL');
+  }
+  if (!hasColumn('games', 'winners')) {
+    db.exec('ALTER TABLE games ADD COLUMN winners TEXT DEFAULT NULL');
+  }
+  if (!hasColumn('games', 'currentQuarter')) {
+    db.exec('ALTER TABLE games ADD COLUMN currentQuarter TEXT DEFAULT NULL');
+  }
+
+  // Migrate any existing completed games that used the old columns
+  if (hasColumn('games', 'rowScore')) {
+    const oldGames = db.prepare(
+      "SELECT id, rowScore, colScore, winner FROM games WHERE status = 'completed' AND rowScore IS NOT NULL AND scores IS NULL"
+    ).all();
+    const update = db.prepare('UPDATE games SET scores = ?, winners = ? WHERE id = ?');
+    for (const g of oldGames) {
+      const scores = { final: { row: g.rowScore, col: g.colScore } };
+      const winners = { final: g.winner };
+      update.run(JSON.stringify(scores), JSON.stringify(winners), g.id);
+    }
+  }
 }
 
 export default db;
