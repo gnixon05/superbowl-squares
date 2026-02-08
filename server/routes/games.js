@@ -4,15 +4,18 @@ import auth from '../middleware/auth.js';
 
 const router = Router();
 
-function generateUniqueNumbers(count) {
-  const numbers = [];
-  const available = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-  for (let i = 0; i < count; i++) {
-    const idx = Math.floor(Math.random() * available.length);
-    numbers.push(available[idx]);
-    available.splice(idx, 1);
+function generateNumberPairs(gridSize) {
+  // Shuffle all 10 digits then deal them into pairs for each grid position
+  const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  for (let i = digits.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [digits[i], digits[j]] = [digits[j], digits[i]];
   }
-  return numbers;
+  const pairs = [];
+  for (let i = 0; i < gridSize; i++) {
+    pairs.push([digits[i * 2], digits[i * 2 + 1]].sort((a, b) => a - b));
+  }
+  return pairs;
 }
 
 function getGameWithSquares(gameId) {
@@ -278,8 +281,8 @@ router.post('/:id/lock', auth, (req, res) => {
       return res.status(400).json({ message: 'Game is already locked or completed' });
     }
 
-    const numbersRow = generateUniqueNumbers(game.gridSize);
-    const numbersCol = generateUniqueNumbers(game.gridSize);
+    const numbersRow = generateNumberPairs(game.gridSize);
+    const numbersCol = generateNumberPairs(game.gridSize);
 
     db.prepare(
       "UPDATE games SET status = 'locked', numbersRow = ?, numbersCol = ?, lockedAt = datetime('now') WHERE id = ?"
@@ -317,13 +320,14 @@ router.post('/:id/complete', auth, (req, res) => {
     }
 
     // Find the winning square based on last digits of scores
+    // Each entry in numbersRow/Col is a pair like [2, 7]
     const numbersRow = JSON.parse(game.numbersRow);
     const numbersCol = JSON.parse(game.numbersCol);
     const rowLastDigit = rowScore % 10;
     const colLastDigit = colScore % 10;
 
-    const winRow = numbersRow.indexOf(rowLastDigit);
-    const winCol = numbersCol.indexOf(colLastDigit);
+    const winRow = numbersRow.findIndex((pair) => pair.includes(rowLastDigit));
+    const winCol = numbersCol.findIndex((pair) => pair.includes(colLastDigit));
 
     let winnerName = null;
     if (winRow !== -1 && winCol !== -1) {

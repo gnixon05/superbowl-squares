@@ -121,13 +121,14 @@ export default function GameBoard() {
   }
 
   // Find winning square if game is completed
+  // Each entry in numbersRow/Col is a pair like [2, 7]
   let winRow = -1;
   let winCol = -1;
   if (game.status === 'completed' && game.numbersRow && game.numbersCol) {
     const rowLastDigit = game.rowScore % 10;
     const colLastDigit = game.colScore % 10;
-    winRow = game.numbersRow.indexOf(rowLastDigit);
-    winCol = game.numbersCol.indexOf(colLastDigit);
+    winRow = game.numbersRow.findIndex((pair) => pair.includes(rowLastDigit));
+    winCol = game.numbersCol.findIndex((pair) => pair.includes(colLastDigit));
   }
 
   return (
@@ -202,9 +203,9 @@ export default function GameBoard() {
                   <div
                     key={c}
                     className="d-flex align-items-center justify-content-center fw-bold bg-primary text-white"
-                    style={{ width: 80, height: 36, fontSize: '0.9rem' }}
+                    style={{ width: 80, height: 36, fontSize: '0.85rem' }}
                   >
-                    {game.numbersCol ? game.numbersCol[c] : '?'}
+                    {game.numbersCol ? game.numbersCol[c].join(', ') : '?, ?'}
                   </div>
                 ))}
               </div>
@@ -214,10 +215,10 @@ export default function GameBoard() {
                 <div key={r} className="d-flex">
                   {/* Row number */}
                   <div
-                    className="d-flex align-items-center justify-content-center fw-bold bg-primary text-white"
-                    style={{ width: 50, height: 80, fontSize: '0.9rem' }}
+                    className="d-flex align-items-center justify-content-center fw-bold bg-primary text-white text-center"
+                    style={{ width: 50, height: 80, fontSize: '0.85rem', lineHeight: '1.2', whiteSpace: 'pre-line' }}
                   >
-                    {game.numbersRow ? game.numbersRow[r] : '?'}
+                    {game.numbersRow ? game.numbersRow[r].join('\n') : '?\n?'}
                   </div>
 
                   {/* Squares */}
