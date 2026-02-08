@@ -8,10 +8,15 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import gameRoutes from './routes/games.js';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
+if (!process.env.JWT_SECRET) {
+  console.error('ERROR: JWT_SECRET is not set. Create a .env file in the project root with JWT_SECRET=your-secret-key');
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
