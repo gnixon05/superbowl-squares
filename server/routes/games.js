@@ -4,6 +4,9 @@ import auth from '../middleware/auth.js';
 
 const router = Router();
 
+const QUARTERS = ['q1', 'q2', 'q3', 'final'];
+const QUARTER_LABELS = { q1: 'Q1', q2: 'Q2', q3: 'Q3', final: 'Final' };
+
 function generateNumberPairs(gridSize) {
   // Shuffle all 10 digits then deal them into pairs for each grid position
   const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -16,6 +19,32 @@ function generateNumberPairs(gridSize) {
     pairs.push([digits[i * 2], digits[i * 2 + 1]].sort((a, b) => a - b));
   }
   return pairs;
+}
+
+function findWinner(gameId, numbersRow, numbersCol, rowScore, colScore) {
+  const rowLastDigit = rowScore % 10;
+  const colLastDigit = colScore % 10;
+  const winRow = numbersRow.findIndex((pair) => pair.includes(rowLastDigit));
+  const winCol = numbersCol.findIndex((pair) => pair.includes(colLastDigit));
+
+  if (winRow === -1 || winCol === -1) return null;
+
+  const winningSquare = db.prepare(
+    'SELECT s.*, u.firstName, u.lastName FROM squares s LEFT JOIN users u ON s.userId = u.id WHERE s.gameId = ? AND s.row = ? AND s.col = ?'
+  ).get(gameId, winRow, winCol);
+
+  if (winningSquare && winningSquare.firstName) {
+    return `${winningSquare.firstName} ${winningSquare.lastName}`;
+  }
+  return null;
+}
+
+function parseGameJSON(game) {
+  game.numbersRow = game.numbersRow ? JSON.parse(game.numbersRow) : null;
+  game.numbersCol = game.numbersCol ? JSON.parse(game.numbersCol) : null;
+  game.scores = game.scores ? JSON.parse(game.scores) : {};
+  game.winners = game.winners ? JSON.parse(game.winners) : {};
+  return game;
 }
 
 function getGameWithSquares(gameId) {
@@ -37,8 +66,7 @@ function getGameWithSquares(gameId) {
   `).all(gameId);
 
   game.squares = squares;
-  game.numbersRow = game.numbersRow ? JSON.parse(game.numbersRow) : null;
-  game.numbersCol = game.numbersCol ? JSON.parse(game.numbersCol) : null;
+  parseGameJSON(game);
 
   return game;
 }
@@ -90,10 +118,8 @@ router.get('/', auth, (req, res) => {
       ORDER BY g.createdAt DESC
     `).all(req.user.id);
 
-    // Parse JSON fields
     for (const game of games) {
-      game.numbersRow = game.numbersRow ? JSON.parse(game.numbersRow) : null;
-      game.numbersCol = game.numbersCol ? JSON.parse(game.numbersCol) : null;
+      parseGameJSON(game);
     }
 
     res.json(games);
@@ -106,7 +132,6 @@ router.get('/', auth, (req, res) => {
 // GET /api/games/my-games
 router.get('/my-games', auth, (req, res) => {
   try {
-    // Games I created or have squares in
     const games = db.prepare(`
       SELECT DISTINCT g.*, u.firstName || ' ' || u.lastName as creatorName,
         (SELECT COUNT(*) FROM squares WHERE gameId = g.id AND userId IS NOT NULL) as claimedSquares,
@@ -119,8 +144,7 @@ router.get('/my-games', auth, (req, res) => {
     `).all(req.user.id, req.user.id, req.user.id);
 
     for (const game of games) {
-      game.numbersRow = game.numbersRow ? JSON.parse(game.numbersRow) : null;
-      game.numbersCol = game.numbersCol ? JSON.parse(game.numbersCol) : null;
+      parseGameJSON(game);
     }
 
     res.json(games);
@@ -148,20 +172,37 @@ router.get('/stats/all', auth, (req, res) => {
     `).all();
 
     for (const game of recentCompleted) {
-      game.numbersRow = game.numbersRow ? JSON.parse(game.numbersRow) : null;
-      game.numbersCol = game.numbersCol ? JSON.parse(game.numbersCol) : null;
+      parseGameJSON(game);
     }
 
-    const topPlayers = db.prepare(`
-      SELECT u.id, u.firstName, u.lastName, u.avatar,
-        COUNT(DISTINCT s.gameId) as gamesPlayed,
-        (SELECT COUNT(*) FROM games WHERE winner = u.firstName || ' ' || u.lastName AND status = 'completed') as wins
-      FROM users u
-      JOIN squares s ON s.userId = u.id
-      GROUP BY u.id
-      ORDER BY wins DESC, gamesPlayed DESC
-      LIMIT 10
-    `).all();
+    // Count quarter wins per player from the winners JSON
+    // We need to scan all completed games and tally wins from the JSON
+    const completedRows = db.prepare(
+      "SELECT winners FROM games WHERE status = 'completed' AND winners IS NOT NULL"
+    ).all();
+
+    const winCounts = {};
+    for (const row of completedRows) {
+      const winners = JSON.parse(row.winners);
+      for (const q of QUARTERS) {
+        if (winners[q]) {
+          winCounts[winners[q]] = (winCounts[winners[q]] || 0) + 1;
+        }
+      }
+    }
+
+    // Get user info for top winners
+    const allUsers = db.prepare(
+      'SELECT u.id, u.firstName, u.lastName, u.avatar, COUNT(DISTINCT s.gameId) as gamesPlayed FROM users u JOIN squares s ON s.userId = u.id GROUP BY u.id'
+    ).all();
+
+    const topPlayers = allUsers.map((u) => ({
+      ...u,
+      wins: winCounts[`${u.firstName} ${u.lastName}`] || 0,
+    })).sort((a, b) => b.wins - a.gamesPlayed || b.gamesPlayed - a.gamesPlayed).slice(0, 10);
+
+    // Sort: most wins first, then most games played
+    topPlayers.sort((a, b) => b.wins - a.wins || b.gamesPlayed - a.gamesPlayed);
 
     res.json({
       totalGames,
@@ -246,7 +287,6 @@ router.post('/:id/unpick', auth, (req, res) => {
       return res.status(404).json({ message: 'Square not found' });
     }
 
-    // Only allow the user who picked it or the game creator to unpick
     if (square.userId !== req.user.id && game.creatorId !== req.user.id) {
       return res.status(403).json({ message: 'Not authorized to remove this pick' });
     }
@@ -285,7 +325,7 @@ router.post('/:id/lock', auth, (req, res) => {
     const numbersCol = generateNumberPairs(game.gridSize);
 
     db.prepare(
-      "UPDATE games SET status = 'locked', numbersRow = ?, numbersCol = ?, lockedAt = datetime('now') WHERE id = ?"
+      "UPDATE games SET status = 'locked', numbersRow = ?, numbersCol = ?, currentQuarter = 'q1', lockedAt = datetime('now') WHERE id = ?"
     ).run(JSON.stringify(numbersRow), JSON.stringify(numbersCol), gameId);
 
     const updatedGame = getGameWithSquares(gameId);
@@ -296,8 +336,8 @@ router.post('/:id/lock', auth, (req, res) => {
   }
 });
 
-// POST /api/games/:id/complete - Set score and complete the game
-router.post('/:id/complete', auth, (req, res) => {
+// POST /api/games/:id/score - Enter score for the current quarter
+router.post('/:id/score', auth, (req, res) => {
   try {
     const gameId = req.params.id;
     const { rowScore, colScore } = req.body;
@@ -308,40 +348,49 @@ router.post('/:id/complete', auth, (req, res) => {
     }
 
     if (game.creatorId !== req.user.id) {
-      return res.status(403).json({ message: 'Only the game creator can complete the game' });
+      return res.status(403).json({ message: 'Only the game creator can enter scores' });
     }
 
     if (game.status !== 'locked') {
-      return res.status(400).json({ message: 'Game must be locked before completing' });
+      return res.status(400).json({ message: 'Game must be locked to enter scores' });
+    }
+
+    const currentQuarter = game.currentQuarter;
+    if (!currentQuarter || !QUARTERS.includes(currentQuarter)) {
+      return res.status(400).json({ message: 'Game scoring is already complete' });
     }
 
     if (rowScore === undefined || colScore === undefined) {
       return res.status(400).json({ message: 'Both scores are required' });
     }
 
-    // Find the winning square based on last digits of scores
-    // Each entry in numbersRow/Col is a pair like [2, 7]
     const numbersRow = JSON.parse(game.numbersRow);
     const numbersCol = JSON.parse(game.numbersCol);
-    const rowLastDigit = rowScore % 10;
-    const colLastDigit = colScore % 10;
 
-    const winRow = numbersRow.findIndex((pair) => pair.includes(rowLastDigit));
-    const winCol = numbersCol.findIndex((pair) => pair.includes(colLastDigit));
+    // Determine winner for this quarter
+    const winnerName = findWinner(gameId, numbersRow, numbersCol, rowScore, colScore);
 
-    let winnerName = null;
-    if (winRow !== -1 && winCol !== -1) {
-      const winningSquare = db.prepare(
-        'SELECT s.*, u.firstName, u.lastName FROM squares s LEFT JOIN users u ON s.userId = u.id WHERE s.gameId = ? AND s.row = ? AND s.col = ?'
-      ).get(gameId, winRow, winCol);
-      if (winningSquare && winningSquare.firstName) {
-        winnerName = `${winningSquare.firstName} ${winningSquare.lastName}`;
-      }
+    // Update scores and winners
+    const scores = game.scores ? JSON.parse(game.scores) : {};
+    const winners = game.winners ? JSON.parse(game.winners) : {};
+
+    scores[currentQuarter] = { row: rowScore, col: colScore };
+    winners[currentQuarter] = winnerName;
+
+    // Advance to next quarter or complete
+    const currentIdx = QUARTERS.indexOf(currentQuarter);
+    const isLast = currentIdx === QUARTERS.length - 1;
+    const nextQuarter = isLast ? null : QUARTERS[currentIdx + 1];
+
+    if (isLast) {
+      db.prepare(
+        "UPDATE games SET status = 'completed', scores = ?, winners = ?, currentQuarter = NULL, completedAt = datetime('now') WHERE id = ?"
+      ).run(JSON.stringify(scores), JSON.stringify(winners), gameId);
+    } else {
+      db.prepare(
+        'UPDATE games SET scores = ?, winners = ?, currentQuarter = ? WHERE id = ?'
+      ).run(JSON.stringify(scores), JSON.stringify(winners), nextQuarter, gameId);
     }
-
-    db.prepare(
-      "UPDATE games SET status = 'completed', rowScore = ?, colScore = ?, winner = ?, completedAt = datetime('now') WHERE id = ?"
-    ).run(rowScore, colScore, winnerName, gameId);
 
     const updatedGame = getGameWithSquares(gameId);
     res.json(updatedGame);

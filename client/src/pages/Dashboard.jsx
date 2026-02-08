@@ -50,12 +50,16 @@ function GameCard({ game }) {
             <span className="mx-2">|</span>
             <span>{game.claimedSquares}/{game.totalSquares} squares taken</span>
           </div>
-          {game.status === 'completed' && game.winner && (
+          {game.status === 'completed' && game.winners && (
             <div className="small mb-2">
-              <Badge bg="info">Winner: {game.winner}</Badge>
-              <span className="ms-2 text-muted">
-                {game.rowScore} - {game.colScore}
-              </span>
+              {game.scores?.final && (
+                <span className="text-muted me-2">
+                  Final: {game.scores.final.row} - {game.scores.final.col}
+                </span>
+              )}
+              {game.winners.final && (
+                <Badge bg="info">Winner: {game.winners.final}</Badge>
+              )}
             </div>
           )}
           <div className="mt-auto">
