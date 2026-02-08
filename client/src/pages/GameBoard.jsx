@@ -8,6 +8,18 @@ import { FaLock, FaTrophy, FaArrowLeft, FaCheck } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 
+const QUARTERS = ['q1', 'q2', 'q3', 'final'];
+const QUARTER_LABELS = { q1: 'Q1', q2: 'Q2', q3: 'Q3', final: 'Final' };
+const QUARTER_COLORS = { q1: '#0d6efd', q2: '#198754', q3: '#fd7e14', final: '#dc3545' };
+
+function findWinningSquare(numbersRow, numbersCol, rowScore, colScore) {
+  if (rowScore === undefined || colScore === undefined || !numbersRow || !numbersCol) return null;
+  const winRow = numbersRow.findIndex((pair) => pair.includes(rowScore % 10));
+  const winCol = numbersCol.findIndex((pair) => pair.includes(colScore % 10));
+  if (winRow === -1 || winCol === -1) return null;
+  return `${winRow}-${winCol}`;
+}
+
 export default function GameBoard() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -16,7 +28,7 @@ export default function GameBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
-  const [showComplete, setShowComplete] = useState(false);
+  const [showScore, setShowScore] = useState(false);
   const [scores, setScores] = useState({ rowScore: '', colScore: '' });
 
   const fetchGame = useCallback(async () => {
@@ -76,19 +88,20 @@ export default function GameBoard() {
     }
   };
 
-  const handleComplete = async (e) => {
+  const handleScore = async (e) => {
     e.preventDefault();
     setActionLoading(true);
     setError('');
     try {
-      const res = await api.post(`/games/${id}/complete`, {
+      const res = await api.post(`/games/${id}/score`, {
         rowScore: parseInt(scores.rowScore, 10),
         colScore: parseInt(scores.colScore, 10),
       });
       setGame(res.data);
-      setShowComplete(false);
+      setShowScore(false);
+      setScores({ rowScore: '', colScore: '' });
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to complete game');
+      setError(err.response?.data?.message || 'Failed to submit score');
     } finally {
       setActionLoading(false);
     }
@@ -120,16 +133,20 @@ export default function GameBoard() {
     squareMap[`${sq.row}-${sq.col}`] = sq;
   }
 
-  // Find winning square if game is completed
-  // Each entry in numbersRow/Col is a pair like [2, 7]
-  let winRow = -1;
-  let winCol = -1;
-  if (game.status === 'completed' && game.numbersRow && game.numbersCol) {
-    const rowLastDigit = game.rowScore % 10;
-    const colLastDigit = game.colScore % 10;
-    winRow = game.numbersRow.findIndex((pair) => pair.includes(rowLastDigit));
-    winCol = game.numbersCol.findIndex((pair) => pair.includes(colLastDigit));
+  // Build winning square map: key -> array of quarter labels that won on this square
+  const winMap = {};
+  for (const q of QUARTERS) {
+    if (game.scores?.[q]) {
+      const key = findWinningSquare(game.numbersRow, game.numbersCol, game.scores[q].row, game.scores[q].col);
+      if (key) {
+        if (!winMap[key]) winMap[key] = [];
+        winMap[key].push(q);
+      }
+    }
   }
+
+  const hasScores = game.scores && Object.keys(game.scores).length > 0;
+  const canEnterScore = isCreator && game.status === 'locked' && game.currentQuarter;
 
   return (
     <Container className="py-4">
@@ -147,19 +164,37 @@ export default function GameBoard() {
               <small className="text-muted">Created by {game.creatorName}</small>
             </div>
             <div className="text-end">
-              <StatusBadge status={game.status} />
-              {game.status === 'completed' && (
-                <div className="mt-2">
-                  <div className="fw-bold">{game.rowScore} - {game.colScore}</div>
-                  {game.winner && (
-                    <Badge bg="success" className="mt-1">
-                      <FaTrophy className="me-1" /> {game.winner}
-                    </Badge>
-                  )}
-                </div>
-              )}
+              <StatusBadge status={game.status} currentQuarter={game.currentQuarter} />
             </div>
           </div>
+
+          {/* Quarter Scoreboard */}
+          {hasScores && (
+            <div className="mt-3 pt-3 border-top">
+              <Row className="g-2">
+                {QUARTERS.map((q) => {
+                  const s = game.scores?.[q];
+                  const w = game.winners?.[q];
+                  if (!s) return null;
+                  return (
+                    <Col xs={6} md={3} key={q}>
+                      <div className="border rounded p-2 text-center" style={{ borderColor: QUARTER_COLORS[q] + ' !important' }}>
+                        <div className="small fw-bold" style={{ color: QUARTER_COLORS[q] }}>{QUARTER_LABELS[q]}</div>
+                        <div className="fw-bold">{s.row} - {s.col}</div>
+                        <div className="small">
+                          {w ? (
+                            <span className="text-success"><FaTrophy className="me-1" style={{ fontSize: '0.6rem' }} />{w}</span>
+                          ) : (
+                            <span className="text-muted">Unclaimed</span>
+                          )}
+                        </div>
+                      </div>
+                    </Col>
+                  );
+                })}
+              </Row>
+            </div>
+          )}
 
           {/* Creator Actions */}
           {isCreator && game.status === 'open' && (
@@ -169,10 +204,10 @@ export default function GameBoard() {
               </Button>
             </div>
           )}
-          {isCreator && game.status === 'locked' && (
+          {canEnterScore && (
             <div className="mt-3 pt-3 border-top">
-              <Button variant="success" size="sm" className="fw-semibold" onClick={() => setShowComplete(true)}>
-                <FaCheck className="me-1" /> Enter Final Score
+              <Button variant="success" size="sm" className="fw-semibold" onClick={() => setShowScore(true)}>
+                <FaCheck className="me-1" /> Enter {QUARTER_LABELS[game.currentQuarter]} Score
               </Button>
             </div>
           )}
@@ -226,12 +261,14 @@ export default function GameBoard() {
                     const sq = squareMap[`${r}-${c}`];
                     const isMine = sq?.userId === user?.id;
                     const isTaken = !!sq?.userId;
-                    const isWinner = r === winRow && c === winCol;
+                    const squareKey = `${r}-${c}`;
+                    const wonQuarters = winMap[squareKey] || [];
+                    const isWinner = wonQuarters.length > 0;
                     const canPick = game.status === 'open' && !isTaken;
                     const canUnpick = game.status === 'open' && isMine;
 
                     let bgClass = 'bg-light border';
-                    if (isWinner) bgClass = 'bg-warning border border-warning';
+                    if (isWinner) bgClass = 'bg-warning bg-opacity-25 border border-warning';
                     else if (isMine) bgClass = 'bg-success bg-opacity-25 border border-success';
                     else if (isTaken) bgClass = 'bg-secondary bg-opacity-10 border';
 
@@ -256,8 +293,24 @@ export default function GameBoard() {
                           if (canPick) e.currentTarget.style.backgroundColor = '';
                         }}
                       >
+                        {/* Quarter win indicators */}
                         {isWinner && (
-                          <FaTrophy className="text-warning position-absolute" style={{ top: 4, right: 4, fontSize: '0.7rem' }} />
+                          <div className="position-absolute d-flex gap-0" style={{ top: 2, right: 2 }}>
+                            {wonQuarters.map((q) => (
+                              <span
+                                key={q}
+                                className="badge rounded-pill"
+                                style={{
+                                  fontSize: '0.5rem',
+                                  padding: '1px 3px',
+                                  backgroundColor: QUARTER_COLORS[q],
+                                  color: 'white',
+                                }}
+                              >
+                                {QUARTER_LABELS[q]}
+                              </span>
+                            ))}
+                          </div>
                         )}
                         {isTaken ? (
                           <>
@@ -280,7 +333,10 @@ export default function GameBoard() {
                           key={c}
                           placement="top"
                           overlay={
-                            <Tooltip>{sq.firstName} {sq.lastName}</Tooltip>
+                            <Tooltip>
+                              {sq.firstName} {sq.lastName}
+                              {isWinner && ` — Won: ${wonQuarters.map((q) => QUARTER_LABELS[q]).join(', ')}`}
+                            </Tooltip>
                           }
                         >
                           {squareContent}
@@ -314,25 +370,30 @@ export default function GameBoard() {
               <div className="bg-secondary bg-opacity-10 border" style={{ width: 20, height: 20 }}></div>
               <small>Taken</small>
             </div>
-            {game.status === 'completed' && (
+            {Object.keys(winMap).length > 0 && (
               <div className="d-flex align-items-center gap-2">
-                <div className="bg-warning border border-warning" style={{ width: 20, height: 20 }}></div>
-                <small>Winner</small>
+                <div className="bg-warning bg-opacity-25 border border-warning" style={{ width: 20, height: 20 }}></div>
+                <small>Quarter winner</small>
               </div>
             )}
           </div>
         </Card.Body>
       </Card>
 
-      {/* Complete Game Modal */}
-      <Modal show={showComplete} onHide={() => setShowComplete(false)} centered>
+      {/* Score Entry Modal */}
+      <Modal show={showScore} onHide={() => setShowScore(false)} centered>
         <Modal.Header closeButton>
-          <Modal.Title className="fw-bold">Enter Final Score</Modal.Title>
+          <Modal.Title className="fw-bold">
+            Enter {game?.currentQuarter ? QUARTER_LABELS[game.currentQuarter] : ''} Score
+          </Modal.Title>
         </Modal.Header>
-        <Form onSubmit={handleComplete}>
+        <Form onSubmit={handleScore}>
           <Modal.Body>
+            <p className="text-muted small">
+              Enter the cumulative score at the end of {game?.currentQuarter ? QUARTER_LABELS[game.currentQuarter] : 'this quarter'}.
+            </p>
             <Form.Group className="mb-3">
-              <Form.Label>{game.teamRow} Score</Form.Label>
+              <Form.Label>{game?.teamRow} Score</Form.Label>
               <Form.Control
                 type="number"
                 min="0"
@@ -342,7 +403,7 @@ export default function GameBoard() {
               />
             </Form.Group>
             <Form.Group className="mb-3">
-              <Form.Label>{game.teamCol} Score</Form.Label>
+              <Form.Label>{game?.teamCol} Score</Form.Label>
               <Form.Control
                 type="number"
                 min="0"
@@ -353,9 +414,9 @@ export default function GameBoard() {
             </Form.Group>
           </Modal.Body>
           <Modal.Footer>
-            <Button variant="secondary" onClick={() => setShowComplete(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setShowScore(false)}>Cancel</Button>
             <Button variant="success" type="submit" className="fw-semibold" disabled={actionLoading}>
-              {actionLoading ? 'Saving...' : 'Complete Game'}
+              {actionLoading ? 'Saving...' : `Submit ${game?.currentQuarter ? QUARTER_LABELS[game.currentQuarter] : ''} Score`}
             </Button>
           </Modal.Footer>
         </Form>
@@ -364,7 +425,14 @@ export default function GameBoard() {
   );
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, currentQuarter }) {
+  if (status === 'locked' && currentQuarter) {
+    return (
+      <Badge bg="warning" text="dark">
+        In Progress — {QUARTER_LABELS[currentQuarter]}
+      </Badge>
+    );
+  }
   const map = {
     open: { bg: 'success', label: 'Open' },
     locked: { bg: 'warning', label: 'Locked' },

@@ -3,6 +3,8 @@ import { Container, Row, Col, Card, Table, Badge, Spinner } from 'react-bootstra
 import { FaChartBar, FaTrophy, FaGamepad, FaMedal } from 'react-icons/fa';
 import api from '../services/api';
 
+const QUARTER_LABELS = { q1: 'Q1', q2: 'Q2', q3: 'Q3', final: 'Final' };
+
 export default function Stats() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -78,7 +80,7 @@ export default function Stats() {
                       <th>#</th>
                       <th>Player</th>
                       <th className="text-center">Games</th>
-                      <th className="text-center">Wins</th>
+                      <th className="text-center">Qtr Wins</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -119,8 +121,8 @@ export default function Stats() {
                   <thead className="table-light">
                     <tr>
                       <th>Game</th>
-                      <th>Score</th>
-                      <th>Winner</th>
+                      <th>Final</th>
+                      <th>Winners</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -132,12 +134,30 @@ export default function Stats() {
                           <small className="text-muted">{game.teamRow} vs {game.teamCol}</small>
                         </td>
                         <td>
-                          <small>{game.rowScore} - {game.colScore}</small>
+                          {game.scores?.final ? (
+                            <small>{game.scores.final.row} - {game.scores.final.col}</small>
+                          ) : (
+                            <small className="text-muted">—</small>
+                          )}
                         </td>
                         <td>
-                          <small className="fw-bold text-success">
-                            {game.winner || 'Unclaimed'}
-                          </small>
+                          {game.winners && Object.keys(game.winners).length > 0 ? (
+                            <div className="d-flex flex-column gap-1">
+                              {['q1', 'q2', 'q3', 'final'].map((q) => {
+                                if (!game.winners[q]) return null;
+                                return (
+                                  <small key={q}>
+                                    <Badge bg={q === 'final' ? 'success' : 'secondary'} className="me-1">
+                                      {QUARTER_LABELS[q]}
+                                    </Badge>
+                                    {game.winners[q]}
+                                  </small>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <small className="text-muted">No winners</small>
+                          )}
                         </td>
                       </tr>
                     ))}
