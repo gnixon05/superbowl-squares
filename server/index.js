@@ -7,6 +7,8 @@ import { initializeDatabase } from './config/db.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import gameRoutes from './routes/games.js';
+import invitationRoutes from './routes/invitations.js';
+import paymentRoutes from './routes/payments.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +34,9 @@ initializeDatabase();
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/games', gameRoutes);
+app.use('/api/games', invitationRoutes);
+app.use('/api/invitations', invitationRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Serve static assets in production
 const clientDist = path.join(__dirname, '..', 'client', 'dist');

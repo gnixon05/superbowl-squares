@@ -60,7 +60,70 @@ export function initializeDatabase() {
       FOREIGN KEY (userId) REFERENCES users(id),
       UNIQUE(gameId, row, col)
     );
+
+    CREATE TABLE IF NOT EXISTS game_invitations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gameId INTEGER NOT NULL,
+      invitedEmail TEXT NOT NULL,
+      invitedUserId INTEGER DEFAULT NULL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'declined')),
+      createdAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+      FOREIGN KEY (invitedUserId) REFERENCES users(id),
+      UNIQUE(gameId, invitedEmail)
+    );
+
+    CREATE TABLE IF NOT EXISTS game_join_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gameId INTEGER NOT NULL,
+      userId INTEGER NOT NULL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'denied')),
+      createdAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+      FOREIGN KEY (userId) REFERENCES users(id),
+      UNIQUE(gameId, userId)
+    );
+
+    CREATE TABLE IF NOT EXISTS payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gameId INTEGER NOT NULL,
+      userId INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      squareCount INTEGER NOT NULL DEFAULT 1,
+      braintreeTransactionId TEXT DEFAULT NULL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'refunded')),
+      createdAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+      FOREIGN KEY (userId) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS payouts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gameId INTEGER NOT NULL,
+      userId INTEGER NOT NULL,
+      quarter TEXT NOT NULL,
+      amount REAL NOT NULL,
+      braintreeTransactionId TEXT DEFAULT NULL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'failed')),
+      createdAt TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+      FOREIGN KEY (userId) REFERENCES users(id)
+    );
   `);
+
+  // Add payment and invitation columns to games table
+  if (!hasColumn('games', 'paymentType')) {
+    db.exec("ALTER TABLE games ADD COLUMN paymentType TEXT DEFAULT 'free' CHECK(paymentType IN ('free', 'paid'))");
+  }
+  if (!hasColumn('games', 'paymentMethod')) {
+    db.exec("ALTER TABLE games ADD COLUMN paymentMethod TEXT DEFAULT NULL CHECK(paymentMethod IN ('integrated', 'offline'))");
+  }
+  if (!hasColumn('games', 'costPerSquare')) {
+    db.exec('ALTER TABLE games ADD COLUMN costPerSquare REAL DEFAULT 0');
+  }
+  if (!hasColumn('games', 'venmoUsername')) {
+    db.exec('ALTER TABLE games ADD COLUMN venmoUsername TEXT DEFAULT NULL');
+  }
 
   // Migrate from old single-winner schema to per-quarter schema
   if (!hasColumn('games', 'scores')) {
