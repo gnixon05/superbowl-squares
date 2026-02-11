@@ -74,17 +74,21 @@ function getGameWithSquares(gameId) {
 // POST /api/games - Create a new game
 router.post('/', auth, (req, res) => {
   try {
-    const { name, teamRow, teamCol, isPublic } = req.body;
+    const { name, teamRow, teamCol, isPublic, paymentType, paymentMethod, costPerSquare, venmoUsername } = req.body;
 
     if (!name || !teamRow || !teamCol) {
       return res.status(400).json({ message: 'Game name and both team names are required' });
     }
 
     const gridSize = 5;
+    const pType = paymentType === 'paid' ? 'paid' : 'free';
+    const pMethod = pType === 'paid' ? (paymentMethod === 'integrated' ? 'integrated' : 'offline') : null;
+    const cost = pType === 'paid' ? (parseFloat(costPerSquare) || 0) : 0;
+    const venmo = pType === 'paid' && pMethod === 'integrated' ? (venmoUsername || null) : null;
 
     const result = db.prepare(
-      'INSERT INTO games (name, creatorId, teamRow, teamCol, gridSize, isPublic) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(name, req.user.id, teamRow, teamCol, gridSize, isPublic !== false ? 1 : 0);
+      'INSERT INTO games (name, creatorId, teamRow, teamCol, gridSize, isPublic, paymentType, paymentMethod, costPerSquare, venmoUsername) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(name, req.user.id, teamRow, teamCol, gridSize, isPublic !== false ? 1 : 0, pType, pMethod, cost, venmo);
 
     // Create empty squares for the grid
     const insertSquare = db.prepare('INSERT INTO squares (gameId, row, col) VALUES (?, ?, ?)');
@@ -105,18 +109,22 @@ router.post('/', auth, (req, res) => {
   }
 });
 
-// GET /api/games - List games
+// GET /api/games - List games (public + games user is invited to or has been approved)
 router.get('/', auth, (req, res) => {
   try {
+    const userEmail = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.id)?.email;
+
     const games = db.prepare(`
-      SELECT g.*, u.firstName || ' ' || u.lastName as creatorName,
+      SELECT DISTINCT g.*, u.firstName || ' ' || u.lastName as creatorName,
         (SELECT COUNT(*) FROM squares WHERE gameId = g.id AND userId IS NOT NULL) as claimedSquares,
         (g.gridSize * g.gridSize) as totalSquares
       FROM games g
       JOIN users u ON g.creatorId = u.id
-      WHERE g.isPublic = 1 OR g.creatorId = ?
+      LEFT JOIN game_invitations gi ON gi.gameId = g.id AND gi.invitedEmail = ? AND gi.status IN ('pending', 'accepted')
+      LEFT JOIN game_join_requests jr ON jr.gameId = g.id AND jr.userId = ? AND jr.status = 'approved'
+      WHERE g.isPublic = 1 OR g.creatorId = ? OR gi.id IS NOT NULL OR jr.id IS NOT NULL
       ORDER BY g.createdAt DESC
-    `).all(req.user.id);
+    `).all(userEmail, req.user.id, req.user.id);
 
     for (const game of games) {
       parseGameJSON(game);
@@ -132,6 +140,8 @@ router.get('/', auth, (req, res) => {
 // GET /api/games/my-games
 router.get('/my-games', auth, (req, res) => {
   try {
+    const userEmail = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.id)?.email;
+
     const games = db.prepare(`
       SELECT DISTINCT g.*, u.firstName || ' ' || u.lastName as creatorName,
         (SELECT COUNT(*) FROM squares WHERE gameId = g.id AND userId IS NOT NULL) as claimedSquares,
@@ -139,9 +149,11 @@ router.get('/my-games', auth, (req, res) => {
       FROM games g
       JOIN users u ON g.creatorId = u.id
       LEFT JOIN squares s ON s.gameId = g.id AND s.userId = ?
-      WHERE g.creatorId = ? OR s.userId = ?
+      LEFT JOIN game_invitations gi ON gi.gameId = g.id AND gi.invitedEmail = ? AND gi.status = 'accepted'
+      LEFT JOIN game_join_requests jr ON jr.gameId = g.id AND jr.userId = ? AND jr.status = 'approved'
+      WHERE g.creatorId = ? OR s.userId = ? OR gi.id IS NOT NULL OR jr.id IS NOT NULL
       ORDER BY g.createdAt DESC
-    `).all(req.user.id, req.user.id, req.user.id);
+    `).all(req.user.id, userEmail, req.user.id, req.user.id, req.user.id);
 
     for (const game of games) {
       parseGameJSON(game);
@@ -224,6 +236,37 @@ router.get('/:id', auth, (req, res) => {
     if (!game) {
       return res.status(404).json({ message: 'Game not found' });
     }
+
+    // For private games, check if user has access
+    if (!game.isPublic && game.creatorId !== req.user.id) {
+      const userEmail = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.id)?.email;
+      const hasInvite = db.prepare(
+        "SELECT id FROM game_invitations WHERE gameId = ? AND invitedEmail = ? AND status IN ('pending', 'accepted')"
+      ).get(game.id, userEmail);
+      const hasApproval = db.prepare(
+        "SELECT id FROM game_join_requests WHERE gameId = ? AND userId = ? AND status = 'approved'"
+      ).get(game.id, req.user.id);
+      const hasSquare = db.prepare('SELECT id FROM squares WHERE gameId = ? AND userId = ?').get(game.id, req.user.id);
+
+      if (!hasInvite && !hasApproval && !hasSquare) {
+        return res.status(403).json({ message: 'You do not have access to this private game' });
+      }
+    }
+
+    // Include user's access info for the frontend
+    const userEmail = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.id)?.email;
+    game.userInvitation = db.prepare(
+      "SELECT * FROM game_invitations WHERE gameId = ? AND invitedEmail = ?"
+    ).get(game.id, userEmail) || null;
+    game.userJoinRequest = db.prepare(
+      "SELECT * FROM game_join_requests WHERE gameId = ? AND userId = ?"
+    ).get(game.id, req.user.id) || null;
+
+    // Include payment status for the current user
+    game.userPayment = db.prepare(
+      "SELECT * FROM payments WHERE gameId = ? AND userId = ? AND status = 'completed'"
+    ).get(game.id, req.user.id) || null;
+
     res.json(game);
   } catch (err) {
     console.error(err);
@@ -231,7 +274,7 @@ router.get('/:id', auth, (req, res) => {
   }
 });
 
-// POST /api/games/:id/pick - Pick a square
+// POST /api/games/:id/pick - Pick a square (adds to pending selections for paid games, or claims directly for free)
 router.post('/:id/pick', auth, (req, res) => {
   try {
     const { row, col } = req.body;
@@ -244,6 +287,21 @@ router.post('/:id/pick', auth, (req, res) => {
 
     if (game.status !== 'open') {
       return res.status(400).json({ message: 'Game is no longer accepting picks' });
+    }
+
+    // For private games, check access
+    if (!game.isPublic && game.creatorId !== req.user.id) {
+      const userEmail = db.prepare('SELECT email FROM users WHERE id = ?').get(req.user.id)?.email;
+      const hasInvite = db.prepare(
+        "SELECT id FROM game_invitations WHERE gameId = ? AND invitedEmail = ? AND status = 'accepted'"
+      ).get(gameId, userEmail);
+      const hasApproval = db.prepare(
+        "SELECT id FROM game_join_requests WHERE gameId = ? AND userId = ? AND status = 'approved'"
+      ).get(gameId, req.user.id);
+
+      if (!hasInvite && !hasApproval) {
+        return res.status(403).json({ message: 'You must be invited or approved to pick squares in this game' });
+      }
     }
 
     const square = db.prepare('SELECT * FROM squares WHERE gameId = ? AND row = ? AND col = ?').get(gameId, row, col);

@@ -10,6 +10,10 @@ A full-stack web application for managing Super Bowl square pool games. Built wi
 - Each grid position assigned 2 numbers (0-9, all digits used)
 - Per-quarter scoring (Q1, Q2, Q3, Final) with automatic winner detection
 - Dashboard with "My Games" and public games to join
+- **Private games** with email invitations and join request approval
+- **Payment support** — free or paid games with configurable cost per square
+- **Venmo/Braintree integration** — in-app payments via Braintree SDK with Venmo support
+- **Automatic payouts** — game creators can initiate per-quarter payouts to winners
 - Stats page with leaderboard and recent results
 - Profile management with avatar selection
 - Mobile-first responsive design (Bootstrap 5)
@@ -20,6 +24,7 @@ A full-stack web application for managing Super Bowl square pool games. Built wi
 - **Backend:** Express 5, Node.js
 - **Database:** SQLite (better-sqlite3)
 - **Auth:** JWT + bcrypt
+- **Payments:** Braintree SDK (Venmo)
 
 ## Local Development
 
@@ -46,6 +51,12 @@ Add the following to `.env`:
 ```
 JWT_SECRET=your-random-secret-key-here
 PORT=5000
+
+# Optional: Braintree/Venmo payments (only needed for integrated payment games)
+BRAINTREE_ENVIRONMENT=sandbox
+BRAINTREE_MERCHANT_ID=your-merchant-id
+BRAINTREE_PUBLIC_KEY=your-public-key
+BRAINTREE_PRIVATE_KEY=your-private-key
 ```
 
 Generate a secure secret:
